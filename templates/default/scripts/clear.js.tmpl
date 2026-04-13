@@ -1,0 +1,23 @@
+/**
+ * @description 清除 __APP_NAME__ 的数据和缓存（等价于 adb shell pm clear <package>）
+ *
+ * 重置 App 到全新安装状态：清除 preferences、数据库、缓存、账号登录态。
+ * 不会卸载 App 本身。清除后一般紧接 `open` 做首次启动引导。
+ *
+ * ⚠️ 这是破坏性操作，调用方应确认真的想重置。
+ */
+
+'use strict';
+
+const pb = require('@phonebase-cloud/pb');
+const { PACKAGE, finish, fail } = require('./_lib.js');
+
+async function main() {
+  const { stdout } = await pb.shell(`pm clear ${PACKAGE}`);
+  const output = (stdout || '').trim();
+  // pm clear 成功时输出 "Success"，失败时输出 "Failed"
+  const cleared = /success/i.test(output);
+  finish({ cleared, raw: output });
+}
+
+main().catch((err) => fail(err, 'clear'));

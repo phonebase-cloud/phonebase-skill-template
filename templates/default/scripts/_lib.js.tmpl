@@ -1,0 +1,147 @@
+/**
+ * __SKILL_NAME__ skill 内部共享工具。
+ *
+ * 约定：scripts/ 下以 `_` 开头的文件会被 scanner 跳过，不会被注册成命令。
+ *
+ * 常见放在这里的东西：
+ *   - PACKAGE 常量
+ *   - dump 解析函数
+ *   - 页面状态判断
+ *   - 统一的 finish / fail helpers
+ *
+ * 输出规范：
+ *   每个命令脚本的 stdout **直接**是业务 data，pb 的输出层会包成
+ *   `{code, data, msg}` 信封。**不要**在 data 里加 `status` 字段。
+ *   观测态用 boolean / 子对象表达（如 `logged_in: true` / `foreground: false`）。
+ *   脚本失败 → `process.exit(1)` + stderr 描述。
+ */
+
+'use strict';
+
+const pb = require('@phonebase-cloud/pb');
+
+// ─── 常量 ─────────────────────────────────────────────────────
+
+/** 目标 App 包名（由 pb skills new 自动填充） */
+const PACKAGE = '__PACKAGE__';
+
+// ─── 基础工具 ──────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 从 `pb.dumpc()` 返回的文本里抽出所有带 text / content-desc 的节点。
+ *
+ * dumpc 返回的每行形如：
+ *   [N] android.widget.TextView text="xxx" content-desc="yyy" bounds=[x1,y1][x2,y2]
+ *
+ * 返回 [{ text, content_desc, bounds, center, width, height, clickable }]
+ */
+function parseVisibleNodes(dumpStr) {
+  if (typeof dumpStr !== 'string') return [];
+  const nodes = [];
+  for (const line of dumpStr.split('\n')) {
+    const textMatch = line.match(/\btext="([^"]*)"/);
+    const descMatch = line.match(/content-desc="([^"]*)"/);
+    const text = textMatch ? textMatch[1] : '';
+    const desc = descMatch ? descMatch[1] : '';
+    if (!text && !desc) continue;
+
+    const boundsMatch = line.match(/bounds=\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!boundsMatch) continue;
+    const [x1, y1, x2, y2] = boundsMatch.slice(1, 5).map((v) => parseInt(v, 10));
+
+    nodes.push({
+      text,
+      content_desc: desc,
+      bounds: [x1, y1, x2, y2],
+      center: [Math.floor((x1 + x2) / 2), Math.floor((y1 + y2) / 2)],
+      width: x2 - x1,
+      height: y2 - y1,
+      clickable: /\bclickable=true\b/.test(line),
+    });
+  }
+  return nodes;
+}
+
+/**
+ * 从 dumpc 抽出所有 clickable 节点（不限 text / content-desc）。
+ *
+ * 用于找 NAF (Not Accessibility Friendly) 的图标按钮，比如纯图标 ImageView，
+ * 没有 text 也没有 content-desc，只能靠几何位置 + clickable 定位。
+ */
+function parseClickableNodes(dumpStr) {
+  if (typeof dumpStr !== 'string') return [];
+  const nodes = [];
+  for (const line of dumpStr.split('\n')) {
+    if (!/\bclickable=true\b/.test(line)) continue;
+    const boundsMatch = line.match(/bounds=\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!boundsMatch) continue;
+    const [x1, y1, x2, y2] = boundsMatch.slice(1, 5).map((v) => parseInt(v, 10));
+    nodes.push({
+      text: (line.match(/\btext="([^"]*)"/) || [, ''])[1],
+      content_desc: (line.match(/content-desc="([^"]*)"/) || [, ''])[1],
+      resource_id: (line.match(/resource-id="([^"]*)"/) || [, ''])[1],
+      bounds: [x1, y1, x2, y2],
+      center: [Math.floor((x1 + x2) / 2), Math.floor((y1 + y2) / 2)],
+      width: x2 - x1,
+      height: y2 - y1,
+    });
+  }
+  return nodes;
+}
+
+/** 从 dumpc 头部 "Screen 1080x2374 rotation=0" 抽屏幕尺寸。 */
+function parseScreenSize(dumpStr) {
+  if (typeof dumpStr !== 'string') return null;
+  const m = dumpStr.match(/Screen (\d+)x(\d+)/);
+  return m ? { width: parseInt(m[1], 10), height: parseInt(m[2], 10) } : null;
+}
+
+/**
+ * 检测 App 是否在前台。
+ *
+ * 返回 true / false，不返回字符串。
+ */
+function isForeground(topActivity) {
+  return ((topActivity && topActivity.package_name) || '') === PACKAGE;
+}
+
+// ─── IO helpers ───────────────────────────────────────────────
+
+/**
+ * 统一输出：把业务 data 打印为 JSON 到 stdout，然后退出。
+ *
+ * 关键：**不要在 data 里加 status 字段**。pb 的输出层会自动套
+ * `{code: 200, data: <这里>, msg: "OK"}` 信封。
+ *
+ * 例子：
+ *   finish({ top_activity: ..., foreground: true })
+ *   → pb 实际返回 {"code":200,"data":{"top_activity":...,"foreground":true},"msg":"OK"}
+ */
+function finish(data, exitCode = 0) {
+  console.log(JSON.stringify(data));
+  process.exit(exitCode);
+}
+
+/**
+ * 失败包装：错误消息打 stderr，退出码 1。
+ *
+ * pb 看到非 0 退出会把 stderr 摘要放到 msg 字段，code 设为非 200。
+ */
+function fail(err, context) {
+  const msg = err && err.message ? err.message : String(err);
+  console.error(`__SKILL_NAME__/${context} failed: ${msg}`);
+  process.exit(1);
+}
+
+module.exports = {
+  PACKAGE,
+  sleep,
+  parseVisibleNodes,
+  parseClickableNodes,
+  parseScreenSize,
+  isForeground,
+  finish,
+  fail,
+};

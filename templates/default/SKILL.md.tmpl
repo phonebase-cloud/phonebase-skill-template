@@ -1,0 +1,53 @@
+---
+name: __SKILL_NAME__
+display_name: __DISPLAY_NAME__
+description: __DESCRIPTION__
+package: __PACKAGE__
+category: __CATEGORY__
+__REQUIRES_BLOCK__---
+
+# __DISPLAY_NAME__ Skill
+
+在真实云手机上驱动 __DISPLAY_NAME__（包名 `__PACKAGE__`）。
+
+## 命令
+
+### 基础三件套（模板已生成）
+
+- `pb __SKILL_NAME__ open` — 启动 App
+- `pb __SKILL_NAME__ close` — 强制停止 App
+- `pb __SKILL_NAME__ clear` — 清除 App 数据和缓存（`pm clear`）
+
+> 如果这个 App 没有 launcher activity（纯后台服务），`pb skills new` 会自动
+> 不生成 `open.js`。
+>
+> 通用 skill（创建时没传 `--package`）则以上三件套都不生成，由作者自己写业务脚本。
+
+### 业务命令
+
+按需在 `scripts/` 下添加新脚本，每个 `.js` 文件 = 一个子命令。常见命令命名约定：
+`search` / `detail` / `post` / `like` / `follow` / `inbox` / `compose` / `read` / ...
+
+想查状态？自己起一个有业务含义的命令名，比如 `account`（查登录账号）、
+`my-apps`（列出 app 列表），别用 `state` —— 这个名字跨 skill 语义不统一，pb 有意
+不作为通用命令约定。
+
+`pb <skill>` 的命令列表里 `open / close / clear` 固定排在最前面（通用生命周期
+命令），其他命令按字母序展示。多字命令用破折号命名（`my-apps.js` → `pb <skill>
+my-apps`），不要用下划线。
+
+## 输出规范
+
+每个命令的 stdout 是**业务数据本身**，pb 会自动包装为 `{code, data, msg}` 信封。
+**不要**在数据里加 `status` 字段——元状态归 pb 的 `code`，观测态用 boolean / 子对象表达：
+
+| 想表达 | 用 |
+|---|---|
+| 命令成功 | `process.exit(0)` + `console.log(JSON.stringify({...业务字段}))` |
+| 脚本失败 | `process.exit(1)` + stderr 描述 → pb 反映成 `code != 200` |
+| 已登录 | `logged_in: true, account: "..."` |
+| 已安装 | `installed: true` |
+| App 在前台 | `foreground: true, top_activity: {...}` |
+
+详见仓库的 `docs/SKILL_AUTHORING.md`。
+
